@@ -21,6 +21,9 @@ public static class DisplayFormatter
 
     public static string BuildTooltip(CodexSnapshot snapshot)
     {
+        var reset = snapshot.EarliestResetAt is { } resetsAt
+            ? $" · resets {Countdown(resetsAt, DateTimeOffset.Now)}"
+            : string.Empty;
         var tooltip = snapshot.SessionWindow is { } sessionWindow
             ? $"Codex: {Math.Round(sessionWindow.RemainingPercent):0}% left"
               + (snapshot.WeeklyWindow is { } weeklyWindow
@@ -29,6 +32,7 @@ public static class DisplayFormatter
             : snapshot.WeeklyWindow is { } weeklyOnly
                 ? $"Codex: week {Math.Round(weeklyOnly.RemainingPercent):0}% left"
                 : "Codex: unavailable";
+        tooltip += reset;
         return tooltip.Length <= 63 ? tooltip : tooltip[..63];
     }
 
@@ -43,9 +47,21 @@ public static class DisplayFormatter
         };
     }
 
-    public static string CreditsLine(int? availableResetCredits) => availableResetCredits is { } credits
-        ? $"Reset credits: {credits}"
-        : "Reset credits: not reported";
+    public static string CreditsLine(
+        int? availableResetCredits,
+        DateTimeOffset? earliestExpiration = null,
+        DateTimeOffset? now = null)
+    {
+        var line = availableResetCredits is { } credits
+            ? $"Reset credits: {credits}"
+            : "Reset credits: not reported";
+        if (availableResetCredits is > 0 && earliestExpiration is { } expiresAt)
+        {
+            line += $" · expires {Countdown(expiresAt, now ?? DateTimeOffset.Now)}";
+        }
+
+        return line;
+    }
 
     public static string UsageLine(UsageSummary? usage)
     {

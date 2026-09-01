@@ -30,10 +30,12 @@ public static class CodexSnapshotParser
         var planType = GetString(accountObject, "planType")
                        ?? buckets.Select(bucket => bucket.PlanType).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
 
-        var resetCredits = rateResult.TryGetProperty("rateLimitResetCredits", out var credits)
-                           && credits.ValueKind == JsonValueKind.Object
-            ? GetInt(credits, "availableCount")
+        JsonElement? resetCreditSummary = rateResult.TryGetProperty("rateLimitResetCredits", out var credits)
+                                           && credits.ValueKind == JsonValueKind.Object
+            ? credits
             : null;
+        var resetCredits = GetInt(resetCreditSummary, "availableCount");
+        var resetCreditDetails = ParseResetCredits(resetCreditSummary);
 
         return new CodexSnapshot(
             fetchedAt,
@@ -41,6 +43,7 @@ public static class CodexSnapshotParser
             planType,
             buckets,
             resetCredits,
+            resetCreditDetails,
             ParseUsage(OptionalResult(usageResponse), fetchedAt));
     }
 
@@ -113,6 +116,37 @@ public static class CodexSnapshotParser
             GetBool(credits, "hasCredits") ?? false,
             GetBool(credits, "unlimited") ?? false,
             GetString(credits, "balance"));
+    }
+
+    private static IReadOnlyList<ResetCredit> ParseResetCredits(JsonElement? parent)
+    {
+        if (parent is not { } value
+            || !value.TryGetProperty("credits", out var credits)
+            || credits.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        var parsed = new List<ResetCredit>();
+        foreach (var credit in credits.EnumerateArray())
+        {
+            if (credit.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            var status = GetString(credit, "status");
+            if (status is not null && !status.Equals("available", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var expiresUnix = GetLong(credit, "expiresAt");
+            parsed.Add(new ResetCredit(
+                expiresUnix is { } unix ? DateTimeOffset.FromUnixTimeSeconds(unix) : null));
+        }
+
+        return parsed;
     }
 
     private static UsageSummary? ParseUsage(JsonElement? result, DateTimeOffset fetchedAt)
@@ -227,7 +261,9 @@ public static class CodexSnapshotParser
             return null;
         }
 
-        return property.TryGetInt64(out var result) ? result : null;
+        return property.ValueKind == JsonValueKind.Number && property.TryGetInt64(out var result)
+            ? result
+            : null;
     }
 
     private static double? GetDouble(JsonElement parent, string name)
@@ -245,4 +281,3 @@ public static class CodexSnapshotParser
                 : null;
     }
 }
-

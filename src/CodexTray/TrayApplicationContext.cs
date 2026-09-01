@@ -108,6 +108,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
     {
         SystemEvents.SessionSwitch -= OnSessionSwitch;
         _refreshCancellation?.Cancel();
+        _client?.Dispose();
         _initialTimer.Stop();
         _refreshTimer.Stop();
         _hoverTimer.Stop();
@@ -191,7 +192,10 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _sessionItem.Visible = snapshot.SessionWindow is not null;
         _sessionItem.Text = DisplayFormatter.WindowLine("Short window", snapshot.SessionWindow, DateTimeOffset.Now);
         _weeklyItem.Text = DisplayFormatter.WindowLine("Weekly", snapshot.WeeklyWindow, DateTimeOffset.Now);
-        _creditsItem.Text = DisplayFormatter.CreditsLine(snapshot.AvailableResetCredits);
+        _creditsItem.Text = DisplayFormatter.CreditsLine(
+            snapshot.AvailableResetCredits,
+            snapshot.EarliestResetCreditExpiresAt,
+            DateTimeOffset.Now);
         _usageItem.Text = DisplayFormatter.UsageLine(snapshot.Usage);
         _updatedItem.Text = $"Updated {snapshot.FetchedAt.LocalDateTime:t}";
         _notifyIcon.Text = DisplayFormatter.BuildTooltip(snapshot);

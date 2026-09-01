@@ -10,6 +10,8 @@ public sealed record LimitWindow(
 
 public sealed record CreditBalance(bool HasCredits, bool Unlimited, string? Balance);
 
+public sealed record ResetCredit(DateTimeOffset? ExpiresAt);
+
 public sealed record LimitBucket(
     string Id,
     string DisplayName,
@@ -33,6 +35,7 @@ public sealed record CodexSnapshot(
     string? PlanType,
     IReadOnlyList<LimitBucket> Buckets,
     int? AvailableResetCredits,
+    IReadOnlyList<ResetCredit> ResetCredits,
     UsageSummary? Usage)
 {
     public LimitBucket? PreferredBucket =>
@@ -52,6 +55,30 @@ public sealed record CodexSnapshot(
     }
 
     public LimitWindow? DisplayWindow => SessionWindow ?? WeeklyWindow;
+
+    public DateTimeOffset? EarliestResetAt
+    {
+        get
+        {
+            var resets = PreferredWindows()
+                .Select(window => window.ResetsAt)
+                .OfType<DateTimeOffset>()
+                .ToArray();
+            return resets.Length == 0 ? null : resets.Min();
+        }
+    }
+
+    public DateTimeOffset? EarliestResetCreditExpiresAt
+    {
+        get
+        {
+            var expirations = ResetCredits
+                .Select(credit => credit.ExpiresAt)
+                .OfType<DateTimeOffset>()
+                .ToArray();
+            return expirations.Length == 0 ? null : expirations.Min();
+        }
+    }
 
     public LimitWindow? WeeklyWindow
     {

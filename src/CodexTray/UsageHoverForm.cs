@@ -76,7 +76,10 @@ internal sealed class UsageHoverForm : Form
         _session.Visible = snapshot.SessionWindow is not null;
         _session.Text = DisplayFormatter.WindowLine("Short window", snapshot.SessionWindow, DateTimeOffset.Now);
         _weekly.Text = DisplayFormatter.WindowLine("Weekly", snapshot.WeeklyWindow, DateTimeOffset.Now);
-        _credits.Text = DisplayFormatter.CreditsLine(snapshot.AvailableResetCredits);
+        _credits.Text = DisplayFormatter.CreditsLine(
+            snapshot.AvailableResetCredits,
+            snapshot.EarliestResetCreditExpiresAt,
+            DateTimeOffset.Now);
         _usage.Text = DisplayFormatter.UsageLine(snapshot.Usage);
         _updated.Text = $"Updated {snapshot.FetchedAt.LocalDateTime:t}";
     }

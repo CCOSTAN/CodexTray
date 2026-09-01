@@ -1,17 +1,24 @@
 using System.Text.Json;
 using CodexTray.Core;
 
+if (args.Contains("app-server", StringComparer.OrdinalIgnoreCase))
+{
+    return await RunFakeAppServerAsync();
+}
+
 var failures = new List<string>();
 Run("parses rate windows and reset credits", ParsesRateWindows, failures);
 Run("parses usage summary and today's tokens", ParsesUsage, failures);
 Run("prefers the codex bucket", PrefersCodexBucket, failures);
 Run("formats bounded tray tooltip", FormatsTooltip, failures);
+Run("formats reset-credit expiration", FormatsResetCreditExpiration, failures);
 Run("detects a weekly reset", DetectsWeeklyReset, failures);
 Run("detects an unused weekly reset", DetectsUnusedWeeklyReset, failures);
 Run("detects a new reset credit", DetectsNewResetCredit, failures);
 Run("does not duplicate a weekly-only window", DoesNotDuplicateWeeklyOnlyWindow, failures);
 Run("maps tray usage colors", MapsTrayUsageColors, failures);
 Run("pauses and resumes refresh state", PausesAndResumesRefreshState, failures);
+await RunAsync("reuses one app-server process", ReusesOneAppServerProcessAsync, failures);
 
 if (failures.Count > 0)
 {
@@ -19,7 +26,7 @@ if (failures.Count > 0)
     return 1;
 }
 
-Console.WriteLine("All 10 Codex Tray checks passed.");
+Console.WriteLine("All 12 Codex Tray checks passed.");
 return 0;
 
 static void ParsesRateWindows()
@@ -29,6 +36,7 @@ static void ParsesRateWindows()
     Equal(75d, snapshot.SessionWindow?.RemainingPercent, "session remaining percent");
     Equal(10_080, snapshot.WeeklyWindow?.WindowMinutes, "weekly duration");
     Equal(2, snapshot.AvailableResetCredits, "reset-credit count");
+    Equal(DateTimeOffset.FromUnixTimeSeconds(1895000000), snapshot.EarliestResetCreditExpiresAt, "reset-credit expiration");
     Equal("pro", snapshot.PlanType, "plan type");
 }
 
@@ -47,9 +55,23 @@ static void PrefersCodexBucket()
 
 static void FormatsTooltip()
 {
-    var tooltip = DisplayFormatter.BuildTooltip(ParseSnapshot());
+    var snapshot = ParseSnapshot();
+    var tooltip = DisplayFormatter.BuildTooltip(snapshot);
     True(tooltip.StartsWith("Codex: 75% left", StringComparison.Ordinal), "tooltip value");
+    True(tooltip.Contains("resets in", StringComparison.Ordinal), "earliest reset countdown");
+    Equal(snapshot.SessionWindow?.ResetsAt, snapshot.EarliestResetAt, "earliest reset window");
     True(tooltip.Length <= 63, "tooltip length");
+}
+
+static void FormatsResetCreditExpiration()
+{
+    var snapshot = ParseSnapshot();
+    var line = DisplayFormatter.CreditsLine(
+        snapshot.AvailableResetCredits,
+        snapshot.EarliestResetCreditExpiresAt,
+        DateTimeOffset.FromUnixTimeSeconds(1894000000));
+    True(line.StartsWith("Reset credits: 2", StringComparison.Ordinal), "reset-credit value");
+    True(line.Contains("expires in", StringComparison.Ordinal), "reset-credit expiration countdown");
 }
 
 static void DetectsWeeklyReset()
@@ -116,6 +138,80 @@ static void PausesAndResumesRefreshState()
     True(!gate.IsPaused, "refresh resumes");
 }
 
+static async Task ReusesOneAppServerProcessAsync()
+{
+    var markerPath = Path.Combine(Path.GetTempPath(), $"codex-tray-app-server-{Guid.NewGuid():N}.txt");
+    const string markerVariable = "CODEX_TRAY_TEST_APP_SERVER_MARKER";
+    var previousMarker = Environment.GetEnvironmentVariable(markerVariable);
+    Environment.SetEnvironmentVariable(markerVariable, markerPath);
+
+    try
+    {
+        using var client = new CodexAppServerClient(
+            Environment.ProcessPath ?? throw new InvalidOperationException("Test executable path is unavailable."),
+            TimeSpan.FromSeconds(10));
+        await client.FetchAsync();
+        await client.FetchAsync();
+
+        var starts = await File.ReadAllLinesAsync(markerPath);
+        Equal(1, starts.Length, "app-server launch count across two refreshes");
+    }
+    finally
+    {
+        Environment.SetEnvironmentVariable(markerVariable, previousMarker);
+        File.Delete(markerPath);
+    }
+}
+
+static async Task<int> RunFakeAppServerAsync()
+{
+    var markerPath = Environment.GetEnvironmentVariable("CODEX_TRAY_TEST_APP_SERVER_MARKER");
+    if (!string.IsNullOrWhiteSpace(markerPath))
+    {
+        await File.AppendAllTextAsync(markerPath, "started" + Environment.NewLine);
+    }
+
+    while (await Console.In.ReadLineAsync() is { } line)
+    {
+        using var document = JsonDocument.Parse(line);
+        var root = document.RootElement;
+        if (!root.TryGetProperty("id", out var idProperty)
+            || !idProperty.TryGetInt32(out var id)
+            || !root.TryGetProperty("method", out var methodProperty))
+        {
+            continue;
+        }
+
+        object result = methodProperty.GetString() switch
+        {
+            "account/read" => new
+            {
+                account = new { type = "chatgpt", email = "test@example.com", planType = "pro" }
+            },
+            "account/rateLimits/read" => new
+            {
+                rateLimits = new
+                {
+                    limitId = "codex",
+                    primary = new { usedPercent = 25, windowDurationMins = 300, resetsAt = 1893456000 },
+                    secondary = new { usedPercent = 40, windowDurationMins = 10080, resetsAt = 1894060800 }
+                }
+            },
+            "account/usage/read" => new
+            {
+                summary = new { lifetimeTokens = 1234, peakDailyTokens = 123, currentStreakDays = 2 },
+                dailyUsageBuckets = Array.Empty<object>()
+            },
+            _ => new { }
+        };
+
+        await Console.Out.WriteLineAsync(JsonSerializer.Serialize(new { id, result }));
+        await Console.Out.FlushAsync();
+    }
+
+    return 0;
+}
+
 static CodexSnapshot ParseSnapshot()
 {
     var today = DateOnly.FromDateTime(DateTime.Now).ToString("yyyy-MM-dd");
@@ -129,7 +225,10 @@ static CodexSnapshot ParseSnapshot()
             "other":{"limitId":"other","primary":{"usedPercent":10,"windowDurationMins":60,"resetsAt":1893456000}},
             "codex":{"limitId":"codex","planType":"pro","primary":{"usedPercent":25,"windowDurationMins":300,"resetsAt":1893456000},"secondary":{"usedPercent":40,"windowDurationMins":10080,"resetsAt":1894060800}}
           },
-          "rateLimitResetCredits":{"availableCount":2,"credits":[]}
+          "rateLimitResetCredits":{"availableCount":2,"credits":[
+            {"id":"credit-1","status":"available","expiresAt":1895000000},
+            {"id":"credit-2","status":"available","expiresAt":null}
+          ]}
         }}
         """);
     using var usage = JsonDocument.Parse(
@@ -143,6 +242,19 @@ static void Run(string name, Action action, List<string> failures)
     try
     {
         action();
+        Console.WriteLine($"PASS {name}");
+    }
+    catch (Exception ex)
+    {
+        failures.Add($"FAIL {name}: {ex.Message}");
+    }
+}
+
+static async Task RunAsync(string name, Func<Task> action, List<string> failures)
+{
+    try
+    {
+        await action();
         Console.WriteLine($"PASS {name}");
     }
     catch (Exception ex)

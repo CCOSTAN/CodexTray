@@ -25,12 +25,15 @@ This unofficial community project is not affiliated with OpenAI.
 ## What it does
 
 - Hover over the tray icon to see the full short-window, weekly, credit, token, and update summary.
+- The compact taskbar tooltip includes the countdown for the earliest reported reset.
+- Reset-credit details show the earliest expiration countdown when the Codex response provides one.
 - Right-click the tray icon to open the menu. Left-click has no action.
 - Click **Profile & usage** to open the [official Codex usage page](https://chatgpt.com/codex/cloud/settings/analytics#usage).
 - Read the large, transparent percentage glyph in the icon: green above 50%, amber from 21% through 50%, and red at 20% or below.
 - Receive a Windows notification and a taskbar window with a red **1** badge when the weekly window resets or OpenAI adds a reset credit.
 - Pause polling while Windows is locked, then refresh after unlock.
 - Refresh every five minutes or use **Refresh now**.
+- Reuse one local Codex app-server for the tray session instead of relaunching it on every refresh.
 - Start with Windows through the current-user startup setting.
 
 ## Screenshots
