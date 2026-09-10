@@ -200,7 +200,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _updatedItem.Text = $"Updated {snapshot.FetchedAt.LocalDateTime:t}";
         _notifyIcon.Text = DisplayFormatter.BuildTooltip(snapshot);
         _hoverForm.UpdateSnapshot(snapshot);
-        ReplaceIcon(snapshot.DisplayWindow?.RemainingPercent);
+        ReplaceIcon(snapshot.DisplayWindow);
     }
 
     private void ApplyError(string message)
@@ -215,9 +215,9 @@ internal sealed class TrayApplicationContext : ApplicationContext
         }
     }
 
-    private void ReplaceIcon(double? remainingPercent)
+    private void ReplaceIcon(LimitWindow? window)
     {
-        var next = TrayIconRenderer.Render(remainingPercent);
+        var next = TrayIconRenderer.Render(window);
         _notifyIcon.Icon = next;
         var previous = _currentIcon;
         _currentIcon = next;

@@ -9,15 +9,16 @@ internal static class TrayIconRenderer
     private const int CanvasSize = 32;
     private const float TextPadding = 1.5f;
 
-    public static Icon Render(double? remainingPercent)
+    public static Icon Render(LimitWindow? window)
     {
+        var remainingPercent = window?.RemainingPercent;
         using var bitmap = new Bitmap(CanvasSize, CanvasSize, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
         using var graphics = Graphics.FromImage(bitmap);
         graphics.SmoothingMode = SmoothingMode.AntiAlias;
         graphics.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
         graphics.Clear(Color.Transparent);
 
-        var color = UsageBandSelector.Select(remainingPercent) switch
+        var color = UsageBandSelector.SelectWindow(window, DateTimeOffset.Now) switch
         {
             UsageBand.Green => Color.FromArgb(34, 197, 94),
             UsageBand.Amber => Color.FromArgb(245, 158, 11),

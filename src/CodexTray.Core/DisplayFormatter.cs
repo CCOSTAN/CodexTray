@@ -4,6 +4,19 @@ namespace CodexTray.Core;
 
 public static class DisplayFormatter
 {
+    public static string PaceLine(LimitWindow? window, DateTimeOffset now)
+    {
+        var ahead = UsageBandSelector.AheadOfPace(window, now);
+        if (ahead is null)
+        {
+            return "Pace: unavailable (waiting for current reset timing)";
+        }
+
+        var status = ahead >= 15d ? "too fast" : ahead > 5d ? "running ahead" : "on track";
+        var expectedUsed = window!.UsedPercent - ahead.Value;
+        return $"Pace: {status} ({window.UsedPercent:0.#}% used; {expectedUsed:0.#}% budgeted so far)";
+    }
+
     public static string WindowLine(string label, LimitWindow? window, DateTimeOffset now)
     {
         if (window is null)
@@ -24,13 +37,13 @@ public static class DisplayFormatter
         var reset = snapshot.EarliestResetAt is { } resetsAt
             ? $" · resets {Countdown(resetsAt, DateTimeOffset.Now)}"
             : string.Empty;
-        var tooltip = snapshot.SessionWindow is { } sessionWindow
-            ? $"Codex: {Math.Round(sessionWindow.RemainingPercent):0}% left"
-              + (snapshot.WeeklyWindow is { } weeklyWindow
-                  ? $", week {Math.Round(weeklyWindow.RemainingPercent):0}%"
+        var tooltip = snapshot.WeeklyWindow is { } weeklyWindow
+            ? $"Codex: week {Math.Round(weeklyWindow.RemainingPercent):0}% left"
+              + (snapshot.SessionWindow is { } sessionWindow
+                  ? $", short {Math.Round(sessionWindow.RemainingPercent):0}%"
                   : string.Empty)
-            : snapshot.WeeklyWindow is { } weeklyOnly
-                ? $"Codex: week {Math.Round(weeklyOnly.RemainingPercent):0}% left"
+            : snapshot.SessionWindow is { } sessionOnly
+                ? $"Codex: {Math.Round(sessionOnly.RemainingPercent):0}% left"
                 : "Codex: unavailable";
         tooltip += reset;
         return tooltip.Length <= 63 ? tooltip : tooltip[..63];

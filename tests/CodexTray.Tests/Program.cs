@@ -17,6 +17,8 @@ Run("detects an unused weekly reset", DetectsUnusedWeeklyReset, failures);
 Run("detects a new reset credit", DetectsNewResetCredit, failures);
 Run("does not duplicate a weekly-only window", DoesNotDuplicateWeeklyOnlyWindow, failures);
 Run("maps tray usage colors", MapsTrayUsageColors, failures);
+Run("colors quota by elapsed window pace", ColorsQuotaByPace, failures);
+Run("handles missing and expired pace timing", HandlesPaceTiming, failures);
 Run("pauses and resumes refresh state", PausesAndResumesRefreshState, failures);
 await RunAsync("reuses one app-server process", ReusesOneAppServerProcessAsync, failures);
 
@@ -26,7 +28,7 @@ if (failures.Count > 0)
     return 1;
 }
 
-Console.WriteLine("All 12 Codex Tray checks passed.");
+Console.WriteLine("All 14 Codex Tray checks passed.");
 return 0;
 
 static void ParsesRateWindows()
@@ -35,6 +37,7 @@ static void ParsesRateWindows()
     Equal(25d, snapshot.SessionWindow?.UsedPercent, "session used percent");
     Equal(75d, snapshot.SessionWindow?.RemainingPercent, "session remaining percent");
     Equal(10_080, snapshot.WeeklyWindow?.WindowMinutes, "weekly duration");
+    Equal(snapshot.WeeklyWindow, snapshot.DisplayWindow, "tray prefers weekly quota");
     Equal(2, snapshot.AvailableResetCredits, "reset-credit count");
     Equal(DateTimeOffset.FromUnixTimeSeconds(1895000000), snapshot.EarliestResetCreditExpiresAt, "reset-credit expiration");
     Equal("pro", snapshot.PlanType, "plan type");
@@ -57,7 +60,7 @@ static void FormatsTooltip()
 {
     var snapshot = ParseSnapshot();
     var tooltip = DisplayFormatter.BuildTooltip(snapshot);
-    True(tooltip.StartsWith("Codex: 75% left", StringComparison.Ordinal), "tooltip value");
+    True(tooltip.StartsWith($"Codex: week {Math.Round(snapshot.WeeklyWindow!.RemainingPercent):0}% left", StringComparison.Ordinal), "tooltip value");
     True(tooltip.Contains("resets in", StringComparison.Ordinal), "earliest reset countdown");
     Equal(snapshot.SessionWindow?.ResetsAt, snapshot.EarliestResetAt, "earliest reset window");
     True(tooltip.Length <= 63, "tooltip length");
@@ -121,10 +124,42 @@ static void DoesNotDuplicateWeeklyOnlyWindow()
 static void MapsTrayUsageColors()
 {
     Equal(UsageBand.Unknown, UsageBandSelector.Select(null), "unknown usage band");
-    Equal(UsageBand.Green, UsageBandSelector.Select(51), "green usage band");
-    Equal(UsageBand.Amber, UsageBandSelector.Select(50), "amber usage band");
-    Equal(UsageBand.Amber, UsageBandSelector.Select(21), "low amber usage band");
-    Equal(UsageBand.Red, UsageBandSelector.Select(20), "red usage band");
+    Equal(UsageBand.Green, UsageBandSelector.Select(25.01), "green usage band");
+    Equal(UsageBand.Amber, UsageBandSelector.Select(25), "amber usage band");
+    Equal(UsageBand.Amber, UsageBandSelector.Select(15.01), "low amber usage band");
+    Equal(UsageBand.Red, UsageBandSelector.Select(15), "red usage band");
+    Equal(UsageBand.Red, UsageBandSelector.Select(0), "exhausted quota");
+}
+
+static void ColorsQuotaByPace()
+{
+    var start = DateTimeOffset.Parse("2026-09-01T00:00:00Z");
+    var week = new LimitWindow(40, 10080, start.AddDays(7));
+    Equal(UsageBand.Red, UsageBandSelector.SelectWindow(week, start.AddDays(1)), "40 percent on day one is red");
+    Equal(UsageBand.Green, UsageBandSelector.SelectWindow(week, start.AddDays(3)), "pace catches up without extra usage");
+    Equal(UsageBand.Green, UsageBandSelector.SelectWindow(week with { UsedPercent = 55 }, start.AddDays(3.5)), "five-point tolerance boundary");
+    Equal(UsageBand.Amber, UsageBandSelector.SelectWindow(week with { UsedPercent = 55.01 }, start.AddDays(3.5)), "just over tolerance");
+    Equal(UsageBand.Amber, UsageBandSelector.SelectWindow(week with { UsedPercent = 64.99 }, start.AddDays(3.5)), "below red pace boundary");
+    Equal(UsageBand.Red, UsageBandSelector.SelectWindow(week with { UsedPercent = 65 }, start.AddDays(3.5)), "15-point red boundary");
+    Equal(UsageBand.Amber, UsageBandSelector.SelectWindow(week with { UsedPercent = 75 }, start.AddDays(6)), "low remaining overrides good pace");
+    Equal(UsageBand.Red, UsageBandSelector.SelectWindow(week with { UsedPercent = 85 }, start.AddDays(6.9)), "red reserve overrides good pace");
+    Equal(UsageBand.Green, UsageBandSelector.SelectWindow(week with { UsedPercent = 0 }, start), "fresh quota");
+    Equal(UsageBand.Red, UsageBandSelector.SelectWindow(new LimitWindow(65, 300, start.AddMinutes(300)), start.AddMinutes(150)), "uses reported duration");
+    True(DisplayFormatter.PaceLine(week, start.AddDays(1)).Contains("too fast"), "hover explains fast usage");
+    True(DisplayFormatter.PaceLine(week, start.AddDays(3)).Contains("on track"), "hover explains recovered pace");
+}
+
+static void HandlesPaceTiming()
+{
+    var now = DateTimeOffset.Parse("2026-09-01T00:00:00Z");
+    var week = new LimitWindow(40, 10080, null);
+    Equal(UsageBand.Unknown, UsageBandSelector.SelectWindow(null, now), "no data");
+    Equal(UsageBand.Unknown, UsageBandSelector.SelectWindow(week, now), "missing reset cannot imply green");
+    Equal(UsageBand.Red, UsageBandSelector.SelectWindow(week with { UsedPercent = 90 }, now), "missing timing preserves low reserve warning");
+    Equal(UsageBand.Unknown, UsageBandSelector.SelectWindow(week with { ResetsAt = now }, now), "expired sample");
+    Equal(UsageBand.Unknown, UsageBandSelector.SelectWindow(week with { ResetsAt = now.AddDays(8) }, now), "reset beyond window");
+    Equal(UsageBand.Unknown, UsageBandSelector.SelectWindow(week with { WindowMinutes = 0, ResetsAt = now.AddDays(7) }, now), "missing duration");
+    Equal(UsageBand.Unknown, UsageBandSelector.SelectWindow(week with { UsedPercent = double.NaN }, now), "invalid usage");
 }
 
 static void PausesAndResumesRefreshState()

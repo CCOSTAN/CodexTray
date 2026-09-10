@@ -7,6 +7,7 @@ internal sealed class UsageHoverForm : Form
     private readonly LinkLabel _profile = new();
     private readonly Label _session = DetailLabel();
     private readonly Label _weekly = DetailLabel();
+    private readonly Label _pace = DetailLabel();
     private readonly Label _credits = DetailLabel();
     private readonly Label _usage = DetailLabel();
     private readonly Label _updated = DetailLabel(Color.FromArgb(148, 163, 184));
@@ -47,6 +48,7 @@ internal sealed class UsageHoverForm : Form
         panel.Controls.Add(_profile);
         panel.Controls.Add(_session);
         panel.Controls.Add(_weekly);
+        panel.Controls.Add(_pace);
         panel.Controls.Add(_credits);
         panel.Controls.Add(_usage);
         panel.Controls.Add(_updated);
@@ -76,6 +78,7 @@ internal sealed class UsageHoverForm : Form
         _session.Visible = snapshot.SessionWindow is not null;
         _session.Text = DisplayFormatter.WindowLine("Short window", snapshot.SessionWindow, DateTimeOffset.Now);
         _weekly.Text = DisplayFormatter.WindowLine("Weekly", snapshot.WeeklyWindow, DateTimeOffset.Now);
+        _pace.Text = DisplayFormatter.PaceLine(snapshot.DisplayWindow, DateTimeOffset.Now);
         _credits.Text = DisplayFormatter.CreditsLine(
             snapshot.AvailableResetCredits,
             snapshot.EarliestResetCreditExpiresAt,

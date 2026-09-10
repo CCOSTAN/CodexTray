@@ -54,7 +54,7 @@ public sealed record CodexSnapshot(
         }
     }
 
-    public LimitWindow? DisplayWindow => SessionWindow ?? WeeklyWindow;
+    public LimitWindow? DisplayWindow => WeeklyWindow ?? SessionWindow;
 
     public DateTimeOffset? EarliestResetAt
     {

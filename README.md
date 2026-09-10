@@ -29,7 +29,10 @@ This unofficial community project is not affiliated with OpenAI.
 - Reset-credit details show the earliest expiration countdown when the Codex response provides one.
 - Right-click the tray icon to open the menu. Left-click has no action.
 - Click **Profile & usage** to open the [official Codex usage page](https://chatgpt.com/codex/cloud/settings/analytics#usage).
-- Read the large, transparent percentage glyph in the icon: green above 50%, amber from 21% through 50%, and red at 20% or below.
+- Read the large, transparent percentage glyph for weekly quota remaining (short-window quota when no weekly window is reported).
+- Icon colors combine remaining quota with an even pace through the reported window: green above 25% remaining and no more than 5 percentage points ahead of pace; orange at 25% or less remaining or more than 5 points ahead; red at 15% or less remaining or at least 15 points ahead. The more urgent condition wins.
+- For a seven-day quota, the even-use budget is about 14.3% per day: 40% used after one day is red, even with 60% left. The hover card shows actual use against the budget so far. This is a pacing guide, not a forecast of future work.
+- Timing comes from the reported window duration and reset timestamp. Missing or invalid timing cannot produce green; expired samples show gray until refreshed. Low-quota warnings still apply when timing is missing.
 - Receive a Windows notification and a taskbar window with a red **1** badge when the weekly window resets or OpenAI adds a reset credit.
 - Pause polling while Windows is locked, then refresh after unlock.
 - Refresh every five minutes or use **Refresh now**.
