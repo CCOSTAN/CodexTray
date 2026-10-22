@@ -6,7 +6,7 @@ namespace CodexTray;
 internal sealed class TrayApplicationContext : ApplicationContext
 {
     private static readonly TimeSpan RefreshInterval = TimeSpan.FromMinutes(5);
-    private static readonly TimeSpan HoverGracePeriod = TimeSpan.FromSeconds(8);
+    private static readonly TimeSpan HoverGracePeriod = TimeSpan.FromSeconds(5);
     private readonly NotifyIcon _notifyIcon;
     private readonly ContextMenuStrip _menu = new();
     private readonly ToolStripMenuItem _profileItem = new("Profile & usage ↗");
@@ -30,7 +30,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private ResetNotificationForm? _notificationForm;
     private CancellationTokenSource? _refreshCancellation;
     private Icon? _currentIcon;
-    private DateTimeOffset _lastTrayMouseMove = DateTimeOffset.MinValue;
+    private DateTimeOffset? _hoverLeftAt;
     private Point _lastTrayMousePosition = Point.Empty;
     private bool _refreshing;
     private bool _refreshAfterCurrent;
@@ -67,7 +67,6 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _notifyIcon = new NotifyIcon
         {
             Icon = _currentIcon,
-            Text = "Codex: loading usage",
             Visible = true,
             ContextMenuStrip = _menu
         };
@@ -198,7 +197,6 @@ internal sealed class TrayApplicationContext : ApplicationContext
             DateTimeOffset.Now);
         _usageItem.Text = DisplayFormatter.UsageLine(snapshot.Usage);
         _updatedItem.Text = $"Updated {snapshot.FetchedAt.LocalDateTime:t}";
-        _notifyIcon.Text = DisplayFormatter.BuildTooltip(snapshot);
         _hoverForm.UpdateSnapshot(snapshot);
         ReplaceIcon(snapshot.DisplayWindow);
     }
@@ -206,9 +204,6 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private void ApplyError(string message)
     {
         _updatedItem.Text = $"Refresh failed: {Shorten(message, 90)}";
-        _notifyIcon.Text = _lastSnapshot is null
-            ? "Codex: refresh failed"
-            : DisplayFormatter.BuildTooltip(_lastSnapshot) + " (stale)";
         if (_lastSnapshot is null)
         {
             ReplaceIcon(null);
@@ -264,7 +259,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
             return;
         }
 
-        _lastTrayMouseMove = DateTimeOffset.UtcNow;
+        _hoverLeftAt = null;
         _lastTrayMousePosition = Cursor.Position;
         _hoverForm.UpdateSnapshot(_lastSnapshot);
         if (!_hoverForm.Visible)
@@ -277,12 +272,16 @@ internal sealed class TrayApplicationContext : ApplicationContext
     {
         if (_keepHoverOpenForTest || !_hoverForm.Visible || _hoverForm.ContainsCursor || PointerStillOnTrayIcon())
         {
+            _hoverLeftAt = null;
             return;
         }
 
-        if (DateTimeOffset.UtcNow - _lastTrayMouseMove > HoverGracePeriod)
+        var now = DateTimeOffset.UtcNow;
+        _hoverLeftAt ??= now;
+        if (now - _hoverLeftAt.Value >= HoverGracePeriod)
         {
             _hoverForm.Hide();
+            _hoverLeftAt = null;
         }
     }
 

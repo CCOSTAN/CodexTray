@@ -34,6 +34,10 @@ public static class CodexLocator
         }
 
         var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        foreach (var managedRuntime in ManagedDesktopRuntimes(localAppData))
+        {
+            yield return managedRuntime;
+        }
         yield return Path.Combine(localAppData, "Programs", "OpenAI", "Codex", "bin", "codex.exe");
         yield return Path.Combine(localAppData, "OpenAI", "Codex", "bin", "codex.exe");
 
@@ -43,6 +47,25 @@ public static class CodexLocator
                      StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
             yield return Path.Combine(directory, "codex.exe");
+        }
+    }
+
+    private static IReadOnlyList<string> ManagedDesktopRuntimes(string localAppData)
+    {
+        var runtimeRoot = Path.Combine(localAppData, "OpenAI", "Codex", "bin");
+        try
+        {
+            return Directory.Exists(runtimeRoot)
+                ? Directory.EnumerateDirectories(runtimeRoot)
+                    .Select(directory => Path.Combine(directory, "codex.exe"))
+                    .Where(File.Exists)
+                    .OrderByDescending(File.GetLastWriteTimeUtc)
+                    .ToArray()
+                : [];
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return [];
         }
     }
 }

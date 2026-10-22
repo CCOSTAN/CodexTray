@@ -4,13 +4,18 @@ namespace CodexTray;
 
 internal sealed class UsageHoverForm : Form
 {
-    private readonly LinkLabel _profile = new();
+    private readonly Button _profile = new();
     private readonly Label _session = DetailLabel();
-    private readonly Label _weekly = DetailLabel();
     private readonly Label _pace = DetailLabel();
-    private readonly Label _credits = DetailLabel();
+    private readonly UsageQuotaBar _quotaBar = new();
     private readonly Label _usage = DetailLabel();
+    private readonly ResetTimingCard _nextReset = new(
+        Color.FromArgb(27, 45, 48), Color.FromArgb(73, 117, 97), Color.FromArgb(179, 235, 201), 78);
+    private readonly ResetTimingCard _bankedResets = new(
+        Color.FromArgb(42, 36, 59), Color.FromArgb(115, 87, 145), Color.FromArgb(218, 199, 241), 78);
     private readonly Label _updated = DetailLabel(Color.FromArgb(148, 163, 184));
+    private readonly System.Windows.Forms.Timer _countdownTimer = new() { Interval = 1000 };
+    private CodexSnapshot? _snapshot;
 
     public UsageHoverForm()
     {
@@ -29,13 +34,39 @@ internal sealed class UsageHoverForm : Form
         TopMost = true;
 
         _profile.AutoSize = true;
-        _profile.Font = new Font("Segoe UI Semibold", 10f, FontStyle.Regular, GraphicsUnit.Point);
-        _profile.LinkColor = Color.FromArgb(56, 189, 248);
-        _profile.ActiveLinkColor = Color.FromArgb(125, 211, 252);
-        _profile.VisitedLinkColor = _profile.LinkColor;
-        _profile.Margin = new Padding(0, 0, 0, 7);
-        _profile.Text = "Profile & usage ↗";
-        _profile.LinkClicked += (_, _) => Brand.OpenUrl(Brand.CodexUsageUrl);
+        _profile.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+        _profile.Font = new Font("Segoe UI", 9f, FontStyle.Regular, GraphicsUnit.Point);
+        _profile.FlatStyle = FlatStyle.Flat;
+        _profile.FlatAppearance.BorderColor = Color.FromArgb(71, 85, 105);
+        _profile.FlatAppearance.MouseOverBackColor = Color.FromArgb(51, 65, 85);
+        _profile.BackColor = Color.FromArgb(41, 55, 74);
+        _profile.ForeColor = Color.FromArgb(226, 232, 240);
+        _profile.Padding = new Padding(7, 3, 7, 3);
+        _profile.Margin = Padding.Empty;
+        _profile.Anchor = AnchorStyles.Right;
+        _profile.Cursor = Cursors.Hand;
+        _profile.Text = "OpenAI ↗";
+        _profile.Click += (_, _) => Brand.OpenUrl(Brand.CodexUsageUrl);
+
+        var heading = DetailLabel();
+        heading.Text = "Codex usage";
+        heading.Font = new Font("Segoe UI Semibold", 10f, FontStyle.Regular, GraphicsUnit.Point);
+        heading.Anchor = AnchorStyles.Left;
+        heading.Margin = new Padding(0, 0, 10, 0);
+        var header = new TableLayoutPanel
+        {
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            ColumnCount = 2,
+            Anchor = AnchorStyles.Left | AnchorStyles.Right,
+            MinimumSize = new Size(320, 0),
+            Margin = new Padding(0, 0, 0, 8)
+        };
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        header.Controls.Add(heading, 0, 0);
+        header.Controls.Add(_profile, 1, 0);
+        _usage.Margin = new Padding(0, 8, 0, 4);
 
         var panel = new TableLayoutPanel
         {
@@ -45,14 +76,16 @@ internal sealed class UsageHoverForm : Form
             ColumnCount = 1,
             Padding = new Padding(13, 11, 18, 12)
         };
-        panel.Controls.Add(_profile);
+        panel.Controls.Add(header);
         panel.Controls.Add(_session);
-        panel.Controls.Add(_weekly);
         panel.Controls.Add(_pace);
-        panel.Controls.Add(_credits);
+        panel.Controls.Add(_quotaBar);
+        panel.Controls.Add(_nextReset);
+        panel.Controls.Add(_bankedResets);
         panel.Controls.Add(_usage);
         panel.Controls.Add(_updated);
         Controls.Add(panel);
+        _countdownTimer.Tick += (_, _) => UpdateResetCards();
     }
 
     protected override bool ShowWithoutActivation => true;
@@ -72,19 +105,70 @@ internal sealed class UsageHoverForm : Form
 
     public void UpdateSnapshot(CodexSnapshot snapshot)
     {
-        _profile.Text = string.IsNullOrWhiteSpace(snapshot.PlanType)
-            ? "Profile & usage ↗"
-            : $"Profile & usage · {snapshot.PlanType} ↗";
-        _session.Visible = snapshot.SessionWindow is not null;
+        _snapshot = snapshot;
+        var plan = snapshot.PlanType?.Equals("prolite", StringComparison.OrdinalIgnoreCase) == true
+            ? "Pro Lite"
+            : System.Globalization.CultureInfo.CurrentCulture.TextInfo.ToTitleCase(
+                snapshot.PlanType?.Replace('_', ' ') ?? string.Empty);
+        _profile.Text = string.IsNullOrWhiteSpace(plan) ? "OpenAI ↗" : $"OpenAI · {plan} ↗";
+        _session.Visible = snapshot.WeeklyWindow is not null && snapshot.SessionWindow is not null;
         _session.Text = DisplayFormatter.WindowLine("Short window", snapshot.SessionWindow, DateTimeOffset.Now);
-        _weekly.Text = DisplayFormatter.WindowLine("Weekly", snapshot.WeeklyWindow, DateTimeOffset.Now);
-        _pace.Text = DisplayFormatter.PaceLine(snapshot.DisplayWindow, DateTimeOffset.Now);
-        _credits.Text = DisplayFormatter.CreditsLine(
-            snapshot.AvailableResetCredits,
-            snapshot.EarliestResetCreditExpiresAt,
-            DateTimeOffset.Now);
         _usage.Text = DisplayFormatter.UsageLine(snapshot.Usage);
+        UpdateResetCards();
         _updated.Text = $"Updated {snapshot.FetchedAt.LocalDateTime:t}";
+    }
+
+    private void UpdateResetCards()
+    {
+        if (_snapshot is not { } snapshot)
+        {
+            return;
+        }
+
+        var now = DateTimeOffset.Now;
+        var window = snapshot.DisplayWindow;
+        _pace.Text = DisplayFormatter.PaceLine(window, now);
+        _quotaBar.UpdateWindow(window, now);
+        _nextReset.UpdateDetails(
+            snapshot.WeeklyWindow is not null ? "NEXT WEEKLY RESET" : "NEXT RESET",
+            DisplayFormatter.ResetCountdown(window?.ResetsAt, now),
+            window is not null
+                ? $"{Math.Round(window.RemainingPercent):0}% left · {Math.Round(window.UsedPercent):0}% used"
+                : "Usage not reported",
+            DisplayFormatter.ResetDate(window?.ResetsAt));
+
+        var count = snapshot.AvailableResetCredits;
+        _bankedResets.Visible = count is > 0;
+        if (count is > 0)
+        {
+            _bankedResets.UpdateDetails($"BANKED RESETS ({count})",
+                DisplayFormatter.ResetCountdown(snapshot.EarliestResetCreditExpiresAt, now),
+                "Next credit expires",
+                DisplayFormatter.ResetDate(snapshot.EarliestResetCreditExpiresAt));
+        }
+    }
+
+    protected override void OnVisibleChanged(EventArgs e)
+    {
+        base.OnVisibleChanged(e);
+        if (Visible)
+        {
+            UpdateResetCards();
+            _countdownTimer.Start();
+        }
+        else
+        {
+            _countdownTimer.Stop();
+        }
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _countdownTimer.Dispose();
+        }
+        base.Dispose(disposing);
     }
 
     public void ShowNear(Point anchor)

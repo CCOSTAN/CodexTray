@@ -4,6 +4,46 @@ namespace CodexTray.Core;
 
 public static class DisplayFormatter
 {
+    public static string ResetCountdown(DateTimeOffset? target, DateTimeOffset now)
+    {
+        if (target is null)
+        {
+            return "Not reported";
+        }
+
+        var remaining = target.Value - now;
+        if (remaining <= TimeSpan.Zero)
+        {
+            return "Refresh needed";
+        }
+
+        if (remaining.TotalMinutes < 1)
+        {
+            return "Less than 1m";
+        }
+
+        return remaining.TotalDays >= 1
+            ? $"{(int)remaining.TotalDays}d {remaining.Hours}h {remaining.Minutes}m"
+            : remaining.TotalHours >= 1
+                ? $"{(int)remaining.TotalHours}h {remaining.Minutes}m"
+                : $"{remaining.Minutes}m";
+    }
+
+    public static string ResetDate(DateTimeOffset? target, TimeZoneInfo? timeZone = null)
+    {
+        if (target is null)
+        {
+            return "Date not reported";
+        }
+
+        var zone = timeZone ?? TimeZoneInfo.Local;
+        var local = TimeZoneInfo.ConvertTime(target.Value, zone);
+        var zoneLabel = zone.Id is "Eastern Standard Time" or "America/New_York"
+            ? "ET"
+            : $"UTC{local:zzz}";
+        return $"{local.ToString("ddd, MMM d, yyyy · h:mm tt", CultureInfo.CurrentCulture)} {zoneLabel}";
+    }
+
     public static string PaceLine(LimitWindow? window, DateTimeOffset now)
     {
         var ahead = UsageBandSelector.AheadOfPace(window, now);
@@ -30,23 +70,6 @@ public static class DisplayFormatter
             ? $" · resets {Countdown(resetsAt, now)}"
             : string.Empty;
         return $"{label}: {remaining:0}% left ({used:0}% used){reset}";
-    }
-
-    public static string BuildTooltip(CodexSnapshot snapshot)
-    {
-        var reset = snapshot.EarliestResetAt is { } resetsAt
-            ? $" · resets {Countdown(resetsAt, DateTimeOffset.Now)}"
-            : string.Empty;
-        var tooltip = snapshot.WeeklyWindow is { } weeklyWindow
-            ? $"Codex: week {Math.Round(weeklyWindow.RemainingPercent):0}% left"
-              + (snapshot.SessionWindow is { } sessionWindow
-                  ? $", short {Math.Round(sessionWindow.RemainingPercent):0}%"
-                  : string.Empty)
-            : snapshot.SessionWindow is { } sessionOnly
-                ? $"Codex: {Math.Round(sessionOnly.RemainingPercent):0}% left"
-                : "Codex: unavailable";
-        tooltip += reset;
-        return tooltip.Length <= 63 ? tooltip : tooltip[..63];
     }
 
     public static string CompactNumber(long value)

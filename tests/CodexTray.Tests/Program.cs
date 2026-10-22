@@ -10,8 +10,9 @@ var failures = new List<string>();
 Run("parses rate windows and reset credits", ParsesRateWindows, failures);
 Run("parses usage summary and today's tokens", ParsesUsage, failures);
 Run("prefers the codex bucket", PrefersCodexBucket, failures);
-Run("formats bounded tray tooltip", FormatsTooltip, failures);
 Run("formats reset-credit expiration", FormatsResetCreditExpiration, failures);
+Run("formats precise reset countdowns without inventing timing", FormatsResetCountdowns, failures);
+Run("formats reset dates in the selected time zone", FormatsResetDates, failures);
 Run("detects a weekly reset", DetectsWeeklyReset, failures);
 Run("detects an unused weekly reset", DetectsUnusedWeeklyReset, failures);
 Run("detects a new reset credit", DetectsNewResetCredit, failures);
@@ -28,7 +29,7 @@ if (failures.Count > 0)
     return 1;
 }
 
-Console.WriteLine("All 14 Codex Tray checks passed.");
+Console.WriteLine("All 15 Codex Tray checks passed.");
 return 0;
 
 static void ParsesRateWindows()
@@ -56,16 +57,6 @@ static void PrefersCodexBucket()
     Equal("codex", snapshot.PreferredBucket?.Id, "preferred bucket id");
 }
 
-static void FormatsTooltip()
-{
-    var snapshot = ParseSnapshot();
-    var tooltip = DisplayFormatter.BuildTooltip(snapshot);
-    True(tooltip.StartsWith($"Codex: week {Math.Round(snapshot.WeeklyWindow!.RemainingPercent):0}% left", StringComparison.Ordinal), "tooltip value");
-    True(tooltip.Contains("resets in", StringComparison.Ordinal), "earliest reset countdown");
-    Equal(snapshot.SessionWindow?.ResetsAt, snapshot.EarliestResetAt, "earliest reset window");
-    True(tooltip.Length <= 63, "tooltip length");
-}
-
 static void FormatsResetCreditExpiration()
 {
     var snapshot = ParseSnapshot();
@@ -75,6 +66,39 @@ static void FormatsResetCreditExpiration()
         DateTimeOffset.FromUnixTimeSeconds(1894000000));
     True(line.StartsWith("Reset credits: 2", StringComparison.Ordinal), "reset-credit value");
     True(line.Contains("expires in", StringComparison.Ordinal), "reset-credit expiration countdown");
+}
+
+static void FormatsResetCountdowns()
+{
+    var now = DateTimeOffset.Parse("2026-10-22T20:54:00Z");
+    Equal("6d 23h 59m", DisplayFormatter.ResetCountdown(now.AddDays(7).AddMinutes(-1), now), "day/hour/minute countdown");
+    Equal("23h 59m", DisplayFormatter.ResetCountdown(now.AddDays(1).AddMinutes(-1), now), "sub-day countdown");
+    Equal("59m", DisplayFormatter.ResetCountdown(now.AddMinutes(59), now), "sub-hour countdown");
+    Equal("Less than 1m", DisplayFormatter.ResetCountdown(now.AddSeconds(59), now), "sub-minute countdown");
+    Equal("Refresh needed", DisplayFormatter.ResetCountdown(now, now), "elapsed sample needs refresh");
+    Equal("Refresh needed", DisplayFormatter.ResetCountdown(now.AddMinutes(-1), now), "expired sample needs refresh");
+    Equal("Not reported", DisplayFormatter.ResetCountdown(null, now), "missing timing stays unknown");
+}
+
+static void FormatsResetDates()
+{
+    var previousCulture = System.Globalization.CultureInfo.CurrentCulture;
+    System.Globalization.CultureInfo.CurrentCulture = System.Globalization.CultureInfo.GetCultureInfo("en-US");
+    try
+    {
+        var eastern = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
+        Equal("Thu, Oct 29, 2026 · 4:54 PM ET",
+            DisplayFormatter.ResetDate(DateTimeOffset.Parse("2026-10-29T20:54:00Z"), eastern), "Eastern daylight time");
+        Equal("Thu, Nov 5, 2026 · 3:54 PM ET",
+            DisplayFormatter.ResetDate(DateTimeOffset.Parse("2026-11-05T20:54:00Z"), eastern), "Eastern standard time");
+        Equal("Thu, Oct 29, 2026 · 8:54 PM UTC+00:00",
+            DisplayFormatter.ResetDate(DateTimeOffset.Parse("2026-10-29T20:54:00Z"), TimeZoneInfo.Utc), "other zone offset");
+        Equal("Date not reported", DisplayFormatter.ResetDate(null, eastern), "unknown date");
+    }
+    finally
+    {
+        System.Globalization.CultureInfo.CurrentCulture = previousCulture;
+    }
 }
 
 static void DetectsWeeklyReset()
@@ -118,7 +142,7 @@ static void DoesNotDuplicateWeeklyOnlyWindow()
     var snapshot = CodexSnapshotParser.Parse(null, limits.RootElement, null, DateTimeOffset.Now);
     Equal<LimitWindow?>(null, snapshot.SessionWindow, "weekly-only session window");
     Equal(10_080, snapshot.WeeklyWindow?.WindowMinutes, "weekly-only weekly duration");
-    True(DisplayFormatter.BuildTooltip(snapshot).StartsWith("Codex: week 89%", StringComparison.Ordinal), "weekly-only tooltip");
+    Equal(snapshot.WeeklyWindow, snapshot.DisplayWindow, "weekly-only display quota");
 }
 
 static void MapsTrayUsageColors()

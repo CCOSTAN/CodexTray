@@ -18,6 +18,7 @@ try
         weeklyRemainingPercent = snapshot.WeeklyWindow?.RemainingPercent,
         weeklyResetsAt = snapshot.WeeklyWindow?.ResetsAt,
         snapshot.AvailableResetCredits,
+        earliestResetCreditExpiresAt = snapshot.EarliestResetCreditExpiresAt,
         todayTokens = snapshot.Usage?.TodayTokens,
         lifetimeTokens = snapshot.Usage?.LifetimeTokens,
         bucketCount = snapshot.Buckets.Count,

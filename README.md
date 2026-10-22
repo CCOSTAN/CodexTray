@@ -24,9 +24,12 @@ This unofficial community project is not affiliated with OpenAI.
 
 ## What it does
 
-- Hover over the tray icon to see the full short-window, weekly, credit, token, and update summary.
-- The compact taskbar tooltip includes the countdown for the earliest reported reset.
+- Hover over the tray icon to see one full usage panel with short-window, weekly, credit, token, and update details. The small native tooltip is disabled.
 - Reset-credit details show the earliest expiration countdown when the Codex response provides one.
+- The green **Next weekly reset** card combines weekly quota remaining and used with a minute-accurate countdown and exact local reset date. The purple **Banked resets** card appears only when resets are available and shows the available count and next credit expiry. Countdowns update while the panel is visible; missing or elapsed timing is labeled explicitly.
+- Token totals sit below the reset cards. A right-aligned **OpenAI · plan** button opens the official usage page.
+- The panel stays open over the icon or panel, then disappears five seconds after the pointer leaves both.
+- A thin bar beneath the pace summary drains as quota is used. Its dotted marker shows the quota budgeted to remain at the current point in the window; its color follows the tray icon's quota and pace rules. Missing timing omits the marker.
 - Right-click the tray icon to open the menu. Left-click has no action.
 - Click **Profile & usage** to open the [official Codex usage page](https://chatgpt.com/codex/cloud/settings/analytics#usage).
 - Read the large, transparent percentage glyph for weekly quota remaining (short-window quota when no weekly window is reported).
@@ -42,9 +45,15 @@ This unofficial community project is not affiliated with OpenAI.
 ## Screenshots
 
 <p align="center">
-  <img src="assets/codex-tray-taskbar-hover.png" alt="Codex Tray full usage summary shown over the Windows taskbar" width="294">
+  <img src="assets/codex-tray-taskbar-hover.png" alt="Codex Tray usage panel with quota bar, budget marker, reset countdowns, and plan button above the Windows taskbar" width="359">
   <br>
-  Hover over the installed tray icon for the full usage block.
+  One hover panel shows quota and pace, the next weekly reset, available banked resets, and token totals.
+</p>
+
+<p align="center">
+  <img src="assets/codex-tray-hover.png" alt="Codex Tray usage panel with the banked-reset section collapsed when no resets are available" width="355">
+  <br>
+  With no banked resets available, that section disappears and the panel closes up the space. This example uses a simulated zero-credit count.
 </p>
 
 <p align="center">
@@ -99,7 +108,7 @@ Windows may show an unknown-publisher warning because releases are not code-sign
 Codex Tray checks these locations in order:
 
 1. `CODEX_TRAY_CODEX_PATH`, when it points to a `codex.exe` file.
-2. The current user's Codex desktop installation.
+2. The newest available managed runtime in the current user's Codex desktop installation, then legacy desktop locations.
 3. `codex.exe` entries on `PATH`.
 
 ## More from Bear Stone Smart Home
