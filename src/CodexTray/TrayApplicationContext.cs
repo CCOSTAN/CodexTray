@@ -14,6 +14,10 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly ToolStripMenuItem _weeklyItem = DisabledItem("Weekly: loading...");
     private readonly ToolStripMenuItem _creditsItem = DisabledItem("Reset credits: loading...");
     private readonly ToolStripMenuItem _usageItem = DisabledItem("Token usage: loading...");
+    private readonly ToolStripMenuItem _spendItem = new("Monthly API spend");
+    private readonly SpendStore _spendStore = new();
+    private readonly HttpClient _billingHttp = new(new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false })
+        { Timeout = TimeSpan.FromSeconds(20) };
     private readonly ToolStripMenuItem _updatedItem = DisabledItem("Not refreshed yet");
     private readonly ToolStripMenuItem _refreshItem = new("Refresh now");
     private readonly ToolStripMenuItem _startupItem = new("Start with Windows") { CheckOnClick = false };
@@ -29,6 +33,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private NotificationState? _notificationState;
     private ResetNotificationForm? _notificationForm;
     private CancellationTokenSource? _refreshCancellation;
+    private CancellationTokenSource? _spendCancellation;
+    private MonthlySpend? _lastSpend;
     private Icon? _currentIcon;
     private DateTimeOffset? _hoverLeftAt;
     private Point _lastTrayMousePosition = Point.Empty;
@@ -40,6 +46,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
     public TrayApplicationContext(bool showTestNotification = false, bool showTestHover = false)
     {
         _notificationState = _notificationStateStore.Load();
+        _lastSpend = _spendStore.LoadReport();
+        ShowSpend(_spendStore.HasKey ? "Refreshing…" : "Connect via API spend settings");
         _menu.Items.AddRange([
             _profileItem,
             new ToolStripSeparator(),
@@ -47,6 +55,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
             _weeklyItem,
             _creditsItem,
             _usageItem,
+            _spendItem,
+            new ToolStripMenuItem("API spend settings…", null, (_, _) => ConfigureSpend()),
             new ToolStripSeparator(),
             _updatedItem,
             _refreshItem,
@@ -60,6 +70,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
             SyncStartupMenu();
         };
         _profileItem.Click += (_, _) => Brand.OpenUrl(Brand.CodexUsageUrl);
+        _spendItem.Click += (_, _) => Brand.OpenUrl(Brand.SpendUrl);
         _refreshItem.Click += async (_, _) => await RefreshAsync(showFailureBalloon: true);
         _startupItem.Click += (_, _) => ToggleStartup();
 
@@ -89,10 +100,9 @@ internal sealed class TrayApplicationContext : ApplicationContext
             {
                 ShowTestNotification();
             }
-            if (showTestHover && _lastSnapshot is not null)
+            if (showTestHover)
             {
                 _keepHoverOpenForTest = true;
-                _hoverForm.UpdateSnapshot(_lastSnapshot);
                 var workArea = Screen.PrimaryScreen?.WorkingArea ?? Screen.FromPoint(Cursor.Position).WorkingArea;
                 _hoverForm.ShowNear(new Point(workArea.Right - 10, workArea.Bottom - 10));
             }
@@ -107,6 +117,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
     {
         SystemEvents.SessionSwitch -= OnSessionSwitch;
         _refreshCancellation?.Cancel();
+        _spendCancellation?.Cancel();
+        _billingHttp.Dispose();
         _client?.Dispose();
         _initialTimer.Stop();
         _refreshTimer.Stop();
@@ -135,6 +147,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         }
 
         _refreshing = true;
+        _ = RefreshSpendAsync();
         _refreshItem.Enabled = false;
         _updatedItem.Text = "Refreshing...";
         using var refreshCancellation = new CancellationTokenSource();
@@ -201,6 +214,94 @@ internal sealed class TrayApplicationContext : ApplicationContext
         ReplaceIcon(snapshot.DisplayWindow);
     }
 
+    private void ConfigureSpend()
+    {
+        using var form = new SpendSettingsForm(_spendStore.HasKey);
+        var result = form.ShowDialog();
+        if (result is not (DialogResult.OK or DialogResult.No))
+        {
+            return;
+        }
+        _spendCancellation?.Cancel();
+        try
+        {
+            _spendStore.SetKey(result == DialogResult.OK ? form.AdminKey : null);
+            _lastSpend = null;
+            ShowSpend(result == DialogResult.OK ? "Refreshing…" : "Connect via API spend settings");
+            if (!_refreshGate.IsPaused)
+            {
+                _ = RefreshSpendAsync();
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.Cryptography.CryptographicException)
+        {
+            MessageBox.Show("Windows could not save the billing settings.", "Codex Tray", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private async Task RefreshSpendAsync()
+    {
+        _spendCancellation?.Cancel();
+        using var cancellation = new CancellationTokenSource();
+        _spendCancellation = cancellation;
+        try
+        {
+            if (!_spendStore.HasKey)
+            {
+                ShowSpend("Connect via API spend settings");
+                return;
+            }
+
+            ShowSpend("Refreshing…");
+            var client = new OrganizationCostsClient(_billingHttp);
+            var report = await client.FetchAsync(_spendStore.ReadKey(), DateTimeOffset.UtcNow, cancellation.Token);
+            cancellation.Token.ThrowIfCancellationRequested();
+            _lastSpend = report;
+            _spendStore.Save(report);
+            ShowSpend(null);
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+        catch (Exception ex) when (!cancellation.IsCancellationRequested)
+        {
+            var status = ex switch
+            {
+                HttpRequestException { StatusCode: System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden }
+                    => "Access denied. Check your organization admin key in API spend settings.",
+                System.Security.Cryptography.CryptographicException => "Re-enter the key in API spend settings.",
+                HttpRequestException { StatusCode: System.Net.HttpStatusCode.TooManyRequests }
+                    => "Rate limited. Retrying on the next refresh.",
+                _ => "Couldn’t refresh API spend. Use Refresh now to retry."
+            };
+            ShowSpend(status);
+        }
+        finally
+        {
+            if (ReferenceEquals(_spendCancellation, cancellation))
+            {
+                _spendCancellation = null;
+            }
+        }
+    }
+
+    private void ShowSpend(string? status)
+    {
+        var now = DateTimeOffset.UtcNow;
+        if (_lastSpend is not null && !_lastSpend.IsCurrentMonth(now))
+        {
+            _lastSpend = null;
+        }
+        var heading = $"{now:MMMM} API spend";
+        if (_lastSpend is { } report)
+        {
+            heading += $"  {MonthlySpend.Dollars(report.Total)}";
+            var source = $"{report.Source} · {report.AsOf.ToLocalTime():MMM d, h:mm tt}";
+            status = status is null ? source : $"{source} · {status}";
+        }
+        _spendItem.Text = heading + " ↗";
+        _spendItem.ToolTipText = status;
+        _hoverForm.UpdateSpend(heading, _lastSpend, status ?? "");
+    }
+
     private void ApplyError(string message)
     {
         _updatedItem.Text = $"Refresh failed: {Shorten(message, 90)}";
@@ -254,14 +355,17 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     private void ShowHoverCard()
     {
-        if (_refreshGate.IsPaused || _lastSnapshot is null || _menu.Visible)
+        if (_refreshGate.IsPaused || _menu.Visible)
         {
             return;
         }
 
         _hoverLeftAt = null;
         _lastTrayMousePosition = Cursor.Position;
-        _hoverForm.UpdateSnapshot(_lastSnapshot);
+        if (_lastSnapshot is not null)
+        {
+            _hoverForm.UpdateSnapshot(_lastSnapshot);
+        }
         if (!_hoverForm.Visible)
         {
             _hoverForm.ShowNear(Cursor.Position);
@@ -327,6 +431,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         {
             _refreshTimer.Stop();
             _refreshCancellation?.Cancel();
+            _spendCancellation?.Cancel();
             _refreshItem.Enabled = false;
             _updatedItem.Text = "Refresh paused while Windows is locked";
             _hoverForm.Hide();

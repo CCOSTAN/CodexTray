@@ -2,4 +2,6 @@ bin/
 obj/
 artifacts/
 *.user
+billing-key.dpapi*
+monthly-spend.json*
 

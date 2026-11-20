@@ -28,6 +28,7 @@ This unofficial community project is not affiliated with OpenAI.
 - Reset-credit details show the earliest expiration countdown when the Codex response provides one.
 - The green **Next weekly reset** card combines weekly quota remaining and used with a minute-accurate countdown and exact local reset date. The purple **Banked resets** card appears only when resets are available and shows the available count and next credit expiry. Countdowns update while the panel is visible; missing or elapsed timing is labeled explicitly.
 - Token totals sit below the reset cards. A right-aligned **OpenAI · plan** button opens the official usage page.
+- The hover panel shows month-to-date organization API spend in USD. Model and service charges appear in descending order with sub-cent precision for small charges. Click the monthly spend in the tray menu to open OpenAI Analytics.
 - The panel stays open over the icon or panel, then disappears five seconds after the pointer leaves both.
 - A thin bar beneath the pace summary drains as quota is used. Its dotted marker shows the quota budgeted to remain at the current point in the window; its color follows the tray icon's quota and pace rules. Missing timing omits the marker.
 - Right-click the tray icon to open the menu. Left-click has no action.
@@ -43,6 +44,12 @@ This unofficial community project is not affiliated with OpenAI.
 - Start with Windows through the current-user startup setting.
 
 ## Screenshots
+
+<p align="center">
+  <img src="assets/codex-tray-monthly-api-spend.png" alt="Codex Tray hover panel showing a sample monthly API total and four model costs, including a charge under one cent" width="355">
+  <br>
+  Hover over the tray icon to see the month's total and each model's share. This example uses fictional billing and quota data.
+</p>
 
 <p align="center">
   <img src="assets/codex-tray-taskbar-hover.png" alt="Codex Tray usage panel with quota bar, budget marker, reset countdowns, and plan button above the Windows taskbar" width="359">
@@ -62,11 +69,17 @@ This unofficial community project is not affiliated with OpenAI.
   A weekly reset opens a taskbar window with a red 1 badge.
 </p>
 
+## Connect monthly API spend
+
+Right-click the tray and choose **API spend settings…**. Follow **Open OpenAI admin keys** and create a **Restricted** organization admin key with **Usage API Scope** set to **Read** and every other scope set to **None**. Enter the key in the tray dialog. **Save** starts the first refresh. Return to the same dialog to replace the key or disconnect.
+
+Codex Tray reads the [organization Costs API](https://developers.openai.com/api/reference/resources/admin/subresources/organization/subresources/usage/methods/costs) from the first day of the UTC month through today's reporting bucket across all projects. It combines input, output, audio, text, and dated snapshot charges under each model name. Separate services keep their reported names and unlabeled amounts appear under **Other charges**. The panel shows when the figures were retrieved. A refresh failure keeps the dated figures for the current month on screen.
+
 ## Trust model
 
 - The app uses OpenAI's documented [`codex app-server`](https://developers.openai.com/codex/app-server/) JSONL protocol.
-- The app does not read `.codex/auth.json`, handle OAuth/API tokens, or make HTTP requests.
-- Codex owns authentication and OpenAI network access.
+- Codex owns authentication and network access for subscription quotas. The tray does not read Codex credentials.
+- Optional billing access makes authenticated GET requests only to OpenAI's organization costs endpoint. The key is encrypted using Windows DPAPI for the current user. The latest report stores the total, model and service amounts, source, and retrieval time in local application data. Disconnect removes the saved key and report.
 - Codex Tray stores the last weekly reset timestamp, weekly usage, and reset-credit count under the current user's local application-data folder. It needs those values to recognize the next reset or credit.
 - The app has no updater and no NuGet dependencies.
 - Menu links open fixed HTTPS pages only after you click them.

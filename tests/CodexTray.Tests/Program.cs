@@ -22,6 +22,8 @@ Run("colors quota by elapsed window pace", ColorsQuotaByPace, failures);
 Run("handles missing and expired pace timing", HandlesPaceTiming, failures);
 Run("pauses and resumes refresh state", PausesAndResumesRefreshState, failures);
 await RunAsync("reuses one app-server process", ReusesOneAppServerProcessAsync, failures);
+await RunAsync("reconciles monthly billed costs across pages and models", ReconcilesMonthlyCostsAsync, failures);
+await RunAsync("distinguishes an empty report from missing billing access", DistinguishesUnavailableCostsAsync, failures);
 
 if (failures.Count > 0)
 {
@@ -29,8 +31,62 @@ if (failures.Count > 0)
     return 1;
 }
 
-Console.WriteLine("All 15 Codex Tray checks passed.");
+Console.WriteLine("All Codex Tray checks passed.");
 return 0;
+
+static async Task ReconcilesMonthlyCostsAsync()
+{
+    var now = DateTimeOffset.Parse("2026-01-31T22:15:00-05:00");
+    var first = """
+        {"data":[{"results":[
+           {"line_item":"gpt-example, input_tokens","amount":{"value":0.61,"currency":"usd"}},
+           {"line_item":"gpt-speech-2025-03-01 text, input","amount":{"value":0.00042,"currency":"usd"}}
+        ]}],"has_more":true,"next_page":"part+/2"}
+        """;
+    var last = """
+        {"data":[{"results":[
+           {"line_item":"gpt-example, output_tokens","amount":{"value":0.72,"currency":"usd"}},
+           {"line_item":"gpt-speech-2025-03-01 audio, output","amount":{"value":0.00031,"currency":"usd"}},
+           {"line_item":null,"amount":{"value":-0.20,"currency":"usd"}},
+           {"line_item":"Storage","amount":{"value":0.05,"currency":"usd"}}
+        ]}],"has_more":false,"next_page":null}
+        """;
+    using var http = new HttpClient(new CostsHandler(request =>
+    {
+        var uri = request.RequestUri!;
+        var query = System.Web.HttpUtility.ParseQueryString(uri.Query);
+        Equal(HttpMethod.Get, request.Method, "read-only billing request");
+        Equal("https://api.openai.com/v1/organization/costs", uri.GetLeftPart(UriPartial.Path), "billing endpoint");
+        Equal(DateTimeOffset.Parse("2026-02-01T00:00:00Z").ToUnixTimeSeconds().ToString(), query["start_time"], "UTC month boundary");
+        Equal(DateTimeOffset.Parse("2026-02-02T00:00:00Z").ToUnixTimeSeconds().ToString(), query["end_time"], "include the in-progress UTC day");
+        Equal("line_item", query["group_by"], "model-bearing cost lines");
+        var body = query["page"] switch { null => first, "part+/2" => last, _ => throw new Exception("Invalid page") };
+        return new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent(body) };
+    }));
+    var report = await new OrganizationCostsClient(http).FetchAsync("test", now, default);
+    Equal(1.18073m, report.Total, "includes service charges, credits and later pages");
+    Equal(new SpendRow("gpt-example", 1.33m), report.Rows[0], "combined model charges sorted first");
+    Equal("$0.00073", MonthlySpend.Dollars(report.Rows.Single(r => r.Name == "gpt-speech").Amount), "sub-cent spend");
+    Equal(-0.20m, report.Rows.Single(r => r.Name == "Other charges").Amount, "unattributed credit retained");
+    True(!report.IsCurrentMonth(now.AddMonths(1)), "old cache excluded after UTC month rollover");
+}
+
+static async Task DistinguishesUnavailableCostsAsync()
+{
+    using var http = new HttpClient(new CostsHandler(_ => new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+    {
+        Content = new StringContent("""{"data":[{"results":[]}],"has_more":false}""")
+    }));
+    var empty = await new OrganizationCostsClient(http).FetchAsync("test", DateTimeOffset.UtcNow, default);
+    Equal(0m, empty.Total, "empty report is zero");
+    using var denied = new HttpClient(new CostsHandler(_ => new HttpResponseMessage(System.Net.HttpStatusCode.Forbidden)));
+    try
+    {
+        await new OrganizationCostsClient(denied).FetchAsync("test", DateTimeOffset.UtcNow, default);
+        throw new Exception("Denied access produced a spend total");
+    }
+    catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.Forbidden) { }
+}
 
 static void ParsesRateWindows()
 {
@@ -336,4 +392,10 @@ static void True(bool value, string label)
     {
         throw new InvalidOperationException(label);
     }
+}
+
+sealed class CostsHandler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler
+{
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token) =>
+        Task.FromResult(respond(request));
 }
