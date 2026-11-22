@@ -86,6 +86,8 @@ Codex Tray reads the [organization Costs API](https://developers.openai.com/api/
 
 ## Build and verify
 
+Install the .NET 10 SDK to build from source.
+
 ```powershell
 dotnet build .\src\CodexTray\CodexTray.csproj -c Release
 dotnet run --project .\tests\CodexTray.Tests\CodexTray.Tests.csproj -c Release
