@@ -122,7 +122,8 @@ Codex Tray checks these locations in order:
 
 1. `CODEX_TRAY_CODEX_PATH`, when it points to a `codex.exe` file.
 2. The newest available managed runtime in the current user's Codex desktop installation, then legacy desktop locations.
-3. `codex.exe` entries on `PATH`.
+3. The runtime bundled in the current user's registered ChatGPT desktop package (`OpenAI.Codex`). ChatGPT Classic does not include this runtime.
+4. `codex.exe` entries on `PATH`.
 
 ## More from Bear Stone Smart Home
 
