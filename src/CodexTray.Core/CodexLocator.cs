@@ -41,6 +41,11 @@ public static class CodexLocator
         yield return Path.Combine(localAppData, "Programs", "OpenAI", "Codex", "bin", "codex.exe");
         yield return Path.Combine(localAppData, "OpenAI", "Codex", "bin", "codex.exe");
 
+        foreach (var packagedRuntime in CodexDesktopPackage.RuntimePaths())
+        {
+            yield return packagedRuntime;
+        }
+
         var path = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
         foreach (var directory in path.Split(
                      Path.PathSeparator,
